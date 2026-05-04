@@ -1,0 +1,9 @@
+{
+	"id": "obsidian-kbsink",
+	"name": "Kbsink",
+	"version": "0.2.0",
+	"minAppVersion": "1.4.0",
+	"description": "Save article URLs as markdown using bundled kbsink WebAssembly (wechat / xhs / douyin; no external CLI).",
+	"author": "kbsink-org",
+	"isDesktopOnly": true
+}

@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"inlineSourceMap": true,
+		"inlineSources": true,
+		"module": "CommonJS",
+		"target": "ES2022",
+		"allowJs": true,
+		"noImplicitAny": true,
+		"moduleResolution": "node",
+		"importHelpers": true,
+		"strictNullChecks": true,
+		"lib": ["DOM", "ES2022"],
+		"skipLibCheck": true,
+		"rootDir": ".",
+		"outDir": "dist"
+	},
+	"include": ["main.ts", "kbsink-wasm.ts"],
+	"exclude": ["node_modules", "dist"]
+}
