@@ -5,6 +5,7 @@ import {
 	getLanguage,
 	Modal,
 	Notice,
+	Platform,
 	Plugin,
 	PluginSettingTab,
 	Setting,
@@ -89,7 +90,7 @@ const I18N_EN: Messages = {
 	"settings.wasmDebugDesc":
 		"Also print debug-level lines from kbsink.wasm to the developer console (info/warn/error always).",
 	"error.vaultNotLocal":
-		"Vault is not a local folder (FileSystemAdapter required).",
+		"Cannot write to this vault (adapter does not support folder writes).",
 	"error.wasmNotLoaded": "obsidian-kbsink: WASM bridge not loaded",
 	"error.manifestDirMissing":
 		"obsidian-kbsink: manifest.dir is missing; cannot locate kbsink-wasm.js next to main.js.",
@@ -129,7 +130,7 @@ const I18N_ZH: Messages = {
 	"settings.wasmDebug": "WASM 调试日志",
 	"settings.wasmDebugDesc":
 		"同时将 kbsink.wasm 的 debug 级别日志输出到开发者控制台（info/warn/error 始终输出）。",
-	"error.vaultNotLocal": "当前库不是本地文件夹（需要 FileSystemAdapter）。",
+	"error.vaultNotLocal": "无法写入当前库（存储适配器不支持文件夹写入）。",
 	"error.wasmNotLoaded": "obsidian-kbsink：WASM 桥接未加载",
 	"error.manifestDirMissing":
 		"obsidian-kbsink：缺少 manifest.dir，无法定位 kbsink-wasm.js。",
@@ -265,10 +266,11 @@ function absolutePluginInstallDir(plugin: Plugin): string {
 		return path.normalize(dir);
 	}
 	const adapter = plugin.app.vault.adapter;
-	if (!(adapter instanceof FileSystemAdapter)) {
-		throw new Error(t("error.vaultNotFolder"));
+	if (adapter instanceof FileSystemAdapter) {
+		return path.normalize(path.join(adapter.getBasePath(), dir));
 	}
-	return path.normalize(path.join(adapter.getBasePath(), dir));
+	// Mobile / sync vaults: manifest.dir is relative to the vault root.
+	return normalizePath(dir);
 }
 
 async function mkdirpVault(vault: Vault, normalizedFilePath: string): Promise<void> {
@@ -324,6 +326,9 @@ export default class KbsinkPlugin extends Plugin {
 		this.kbsinkWasm = require(path.join(pluginDir, "kbsink-wasm.js")) as KbsinkWasmModule;
 		// `obsidian` resolves from main.js only — register here so kbsink-wasm.js never does require("obsidian").
 		this.kbsinkWasm.registerKbsinkObsidianRequestUrl(requestUrl);
+		this.kbsinkWasm.setKbsinkHttpTransport?.(
+			Platform.isMobileApp ? "requestUrl" : "curl"
+		);
 		this.kbsinkWasm.setKbsinkRequestUrlPerAssetTimeoutMs?.(180_000);
 
 		await this.loadSettings();
@@ -386,12 +391,6 @@ export default class KbsinkPlugin extends Plugin {
 
 	async runKbsink(url: string): Promise<KbsinkJson> {
 		const base = this.vaultBasePath();
-		if (!base) {
-			return {
-				ok: false,
-				error: t("error.vaultNotLocal"),
-			};
-		}
 		try {
 			await this.wasm().ensureKbsinkWasmLoaded();
 		} catch (e: unknown) {
@@ -432,7 +431,9 @@ export default class KbsinkPlugin extends Plugin {
 				this.settings.outputFolder,
 				res
 			);
-			const absMd = path.join(base, ...mdRel.split("/").filter(Boolean));
+			const absMd = base
+				? path.join(base, ...mdRel.split("/").filter(Boolean))
+				: undefined;
 			return {
 				ok: true,
 				title: res.title,

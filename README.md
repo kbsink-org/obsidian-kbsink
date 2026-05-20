@@ -2,7 +2,7 @@
 
 [中文说明](README-zh.md)
 
-Desktop plugin: paste a **WeChat / Xiaohongshu / Douyin** URL and save **markdown + images** into your vault using the bundled **`kbsink.wasm`** (same conversion stack as [kbsink-cli](https://github.com/kbsink-org/kbsink-cli); **no external `kbsink` binary**).
+Obsidian plugin (desktop and mobile): paste a **WeChat / Xiaohongshu / Douyin** URL and save **markdown + images/videos** into your vault using the bundled **`kbsink.wasm`** (same conversion stack as [kbsink-cli](https://github.com/kbsink-org/kbsink-cli); **no external `kbsink` binary**).
 
 ## Build
 
@@ -30,7 +30,7 @@ Copy **everything inside `dist/`** into:
 
 这里的「发布」指的是：**打出可安装的第三方插件包，并挂到本仓库的 GitHub Release**，不是推送到 Obsidian 服务器。
 
-推送与 **`manifest.json` 里 `version`** 一致的 **`v*`** 标签（例如 tag `v0.2.0` 对应 `"version": "0.2.0"`）会跑 **`.github/workflows/release.yml`**：`npm ci` → `npm run build` → 生成 **`obsidian-kbsink-<tag>.zip`**（以及 `.sha256`）并作为 Release 资源上传。zip 内是标准插件目录（`manifest.json`、`main.js`、`wasm/` 等），解压到 **`<库>/.obsidian/plugins/obsidian-kbsink/`** 即可用；也可用 **BRAT** 等工具指向本仓库的 Release。
+推送与 **`manifest.json` 里 `version`** 一致的 **`v*`** 标签（例如 tag `v1.0.1` 对应 `"version": "1.0.1"`）会跑 **`.github/workflows/release.yml`**：`npm ci` → `npm run build` → 生成 **`obsidian-kbsink-<tag>.zip`**（以及 `.sha256`）并作为 Release 资源上传。zip 内是标准插件目录（`manifest.json`、`main.js`、`wasm/` 等），解压到 **`<库>/.obsidian/plugins/obsidian-kbsink/`** 即可用；也可用 **BRAT** 等工具指向本仓库的 Release。
 
 若要出现在 Obsidian **设置 → 社区插件** 的官方列表里，需要另外向 [obsidian-releases](https://github.com/obsidianmd/obsidian-releases) 走提交流程，与上述 workflow 无关。
 
@@ -66,8 +66,9 @@ Put **`wasm_exec.js`** and **`kbsink.wasm`** under repo **`wasm/`** (from `$(go 
 
 ## Prerequisites
 
-- **Desktop Obsidian** (local vault with `FileSystemAdapter`).
-- **Node-style `require`** and **WebAssembly** (Electron desktop).
+- **Obsidian 1.4+** on desktop or mobile (iOS / Android).
+- **WebAssembly** support (desktop Electron and current mobile app).
+- **Desktop**: sync `curl` for WASM HTTP (see common issues). **Mobile**: Obsidian **`requestUrl`** (no `curl`).
 
 ## Usage
 
@@ -82,6 +83,6 @@ Command palette → **Import URL with kbsink** → enter URL → output is writt
 ### Common issues
 
 - **Missing wasm/…**: Run `npm run wasm:pull -- <tag>` or copy files into repo **`wasm/`**, then `npm run build` again.
-- **Vault is not a local folder**: The vault must be a normal folder on disk.
+- **Cannot write to vault**: The vault adapter must support creating folders and files (mobile and desktop vaults are supported; absolute disk paths are desktop-only).
 - **WASM timeout / network errors**: Increase **Timeout (ms)** in settings; some hosts are slow or blocked.
-- **Stuck at HTTP / no further Go logs**: Go **`kbsinkConvertJSON`** is synchronous; **`kbsinkHTTPRoundTrip`** must return JSON immediately (not a Promise). On desktop Obsidian the plugin uses **sync `curl`** (same as `kbsink-cli/scripts/run-wasm.mjs`), with **`--noproxy *`** so a dead local proxy does not hang. After `npm run build`, copy all of **`dist/`** and reload; expect **`[kbsink:http] curl ←`** then **`[kbsink:info]`** lines. You still need **`kbsink.wasm`** from **`cmd/kbsink-wasm`** / **`bridge.go`**.
+- **Stuck at HTTP / no further Go logs**: Go **`kbsinkConvertJSON`** is synchronous; **`kbsinkHTTPRoundTrip`** must return JSON immediately (not a Promise). **Desktop** uses **sync `curl`** (`[kbsink:http] curl ←`). **Mobile** uses **sync `requestUrl`** (`[kbsink:http] requestUrl ←`). After `npm run build`, copy all of **`dist/`** and reload. You still need **`kbsink.wasm`** from **`cmd/kbsink-wasm`** / **`bridge.go`**.

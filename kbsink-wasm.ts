@@ -25,8 +25,15 @@ export type KbsinkRequestUrlFn = (
 
 let requestUrlBridge: KbsinkRequestUrlFn | null = null;
 
+/** Desktop: sync curl. Mobile: Obsidian requestUrl (no child_process / curl). */
+let httpTransport: "curl" | "requestUrl" = "curl";
+
 /** Per-asset ceiling so one slow CDN URL does not burn the whole import deadline. */
 let requestUrlPerAssetTimeoutMs = 180_000;
+
+export function setKbsinkHttpTransport(mode: "curl" | "requestUrl"): void {
+	httpTransport = mode;
+}
 
 export function setKbsinkRequestUrlPerAssetTimeoutMs(ms: number): void {
 	if (Number.isFinite(ms) && ms >= 10_000) {
@@ -88,6 +95,130 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
 		binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
 	}
 	return btoa(binary);
+}
+
+function canUseSyncCurl(): boolean {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const cp = require("child_process") as typeof import("child_process");
+		const r = cp.spawnSync("curl", ["--version"], {
+			encoding: "utf8",
+			timeout: 3000,
+		});
+		return !r.error && (r.status === 0 || r.status === null);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Block until `promise` settles. Desktop may pump with a no-op child process;
+ * mobile relies on the host event loop handling requestUrl while blocked.
+ */
+function syncWaitPromise<T>(promise: Promise<T>, timeoutMs: number): T {
+	let settled = false;
+	let value!: T;
+	let err: unknown;
+	void promise.then(
+		(v) => {
+			value = v;
+			settled = true;
+		},
+		(e) => {
+			err = e;
+			settled = true;
+		}
+	);
+	const deadline = Date.now() + timeoutMs;
+	let cp: typeof import("child_process") | null = null;
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		cp = require("child_process");
+	} catch {
+		cp = null;
+	}
+	while (!settled) {
+		if (Date.now() >= deadline) {
+			throw new Error(`sync wait timeout after ${timeoutMs}ms`);
+		}
+		if (cp) {
+			cp.spawnSync(process.execPath, ["-e", ""], {
+				stdio: "ignore",
+				windowsHide: true,
+				timeout: 2000,
+			});
+		}
+	}
+	if (err !== undefined) {
+		throw err;
+	}
+	return value;
+}
+
+function kbsinkHttpRoundTripSyncRequestUrl(jsonStr: string): string {
+	if (!requestUrlBridge) {
+		throw new Error("kbsinkHTTPRoundTrip: requestUrl bridge not registered");
+	}
+	let j: WasmHostHTTPRequest;
+	try {
+		j = JSON.parse(jsonStr) as WasmHostHTTPRequest;
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		throw new Error(`kbsinkHTTPRoundTrip: invalid JSON (${msg})`);
+	}
+	if (!j.url) {
+		throw new Error("kbsinkHTTPRoundTrip: missing url");
+	}
+	const method = (j.method ?? "GET").toUpperCase();
+	const headers = j.headers ?? {};
+	let body: string | ArrayBuffer | undefined;
+	if (j.bodyB64) {
+		const bin = atob(j.bodyB64);
+		const u8 = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+		body = u8.buffer;
+	}
+	const waitMs =
+		typeof j.timeoutMs === "number" && j.timeoutMs > 0
+			? j.timeoutMs
+			: requestUrlPerAssetTimeoutMs;
+	const param: KbsinkRequestUrlParam =
+		body !== undefined && method !== "GET" && method !== "HEAD"
+			? { url: j.url, method, headers, body, throw: false }
+			: { url: j.url, method, headers, throw: false };
+	console.info("[kbsink:http] requestUrl →", { method, url: j.url, waitMs });
+	const reqPromise = requestUrlBridge(param);
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		setTimeout(
+			() => reject(new Error(`requestUrl timeout after ${waitMs}ms: ${j.url}`)),
+			waitMs
+		);
+	});
+	const r = syncWaitPromise(
+		Promise.race([reqPromise, timeoutPromise]),
+		waitMs + 5000
+	);
+	const buf =
+		r.arrayBuffer && r.arrayBuffer.byteLength > 0
+			? new Uint8Array(r.arrayBuffer)
+			: new TextEncoder().encode(r.text ?? "");
+	const slice = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+	const respHeaders = { ...r.headers };
+	if (!respHeaders["Content-Type"] && r.headers?.["content-type"]) {
+		respHeaders["Content-Type"] = r.headers["content-type"];
+	}
+	console.info("[kbsink:http] requestUrl ←", {
+		method,
+		url: j.url,
+		status: r.status,
+		bodyLen: slice.byteLength,
+	});
+	return JSON.stringify({
+		status: r.status,
+		statusText: r.status >= 200 && r.status < 400 ? "OK" : "Error",
+		headers: respHeaders,
+		bodyBase64: arrayBufferToBase64(slice),
+	});
 }
 
 interface WasmHostHTTPRequest {
@@ -217,7 +348,14 @@ function installKbsinkHostHTTPBridge(): void {
 	const g = globalThis as unknown as {
 		kbsinkHTTPRoundTrip?: (json: string) => string;
 	};
-	g.kbsinkHTTPRoundTrip = kbsinkHttpRoundTripSyncCurl;
+	const useRequestUrl =
+		httpTransport === "requestUrl" ||
+		(httpTransport === "curl" && !canUseSyncCurl());
+	if (useRequestUrl) {
+		g.kbsinkHTTPRoundTrip = kbsinkHttpRoundTripSyncRequestUrl;
+	} else {
+		g.kbsinkHTTPRoundTrip = kbsinkHttpRoundTripSyncCurl;
+	}
 }
 
 /** Remove host hook (e.g. on plugin unload). */

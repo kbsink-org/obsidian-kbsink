@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-kbsink",
-	"version": "0.2.0",
+	"version": "1.0.1",
 	"description": "Obsidian plugin: kbsink URL → markdown in vault",
 	"main": "dist/main.js",
 	"scripts": {
