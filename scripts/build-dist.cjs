@@ -36,6 +36,20 @@ if (fs.existsSync(css)) {
 	fs.copyFileSync(css, path.join(dist, "styles.css"));
 }
 
+const requiredJs = ["main.js", "kbsink-wasm.js"];
+for (const name of requiredJs) {
+	const p = path.join(dist, name);
+	if (!fs.existsSync(p)) {
+		console.error(`prepare-dist: missing ${name} in dist/`);
+		process.exit(1);
+	}
+}
+const mainJs = fs.readFileSync(path.join(dist, "main.js"), "utf8");
+if (mainJs.includes('require("./i18n")') || mainJs.includes("require('./i18n')")) {
+	console.error("prepare-dist: main.js still requires ./i18n — merge i18n into main.ts");
+	process.exit(1);
+}
+
 if (missing) {
 	console.warn("dist/ built but wasm is incomplete; plugin will not load kbsink until wasm is present.");
 }

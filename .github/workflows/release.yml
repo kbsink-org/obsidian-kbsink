@@ -1,0 +1,76 @@
+# Obsidian plugin release: build dist/, zip third-party plugin layout, attach to this repo’s GitHub Release (tag v*).
+# Install: unzip into <Vault>/.obsidian/plugins/<manifest.id>/ (or BRAT pointing at this repo’s releases).
+# In-app community marketplace listing is separate: https://github.com/obsidianmd/obsidian-releases
+
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-plugin:
+    name: Build and attach plugin zip to GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Check manifest version matches tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const tag = process.env.TAG || "";
+          const ver = tag.startsWith("v") ? tag.slice(1) : tag;
+          const m = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+          if (m.version !== ver) {
+            console.error(
+              `manifest.json "version" is "${m.version}" but tag implies "${ver}" (tag=${tag}). Bump manifest before tagging.`
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Verify wasm sources
+        run: |
+          test -f wasm/kbsink.wasm && test -f wasm/wasm_exec.js || {
+            echo "Release build needs wasm/kbsink.wasm and wasm/wasm_exec.js committed (or present in checkout)."
+            exit 1
+          }
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack plugin zip (flat layout for .obsidian/plugins/<id>/)
+        run: |
+          set -euo pipefail
+          id="$(node -p "JSON.parse(require('fs').readFileSync('manifest.json','utf8')).id")"
+          out="${id}-${GITHUB_REF_NAME}.zip"
+          (cd dist && zip -r "../${out}" .)
+          echo "ZIP_NAME=${out}" >> "$GITHUB_ENV"
+          ls -lh "$out"
+
+      - name: SHA256
+        run: |
+          shasum -a 256 "${{ env.ZIP_NAME }}" | tee "${{ env.ZIP_NAME }}.sha256"
+          ls -lh "${{ env.ZIP_NAME }}"*
+
+      - name: Publish Obsidian plugin (GitHub Release assets)
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

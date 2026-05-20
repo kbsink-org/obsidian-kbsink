@@ -6,7 +6,8 @@
 	"scripts": {
 		"build": "node scripts/build-dist.cjs",
 		"dev": "tsc -p . --watch",
-		"wasm:pull": "bash scripts/pull-wasm-from-release.sh"
+		"wasm:pull": "bash scripts/pull-wasm-from-release.sh",
+		"wasm:sync": "bash scripts/sync-wasm-from-cli.sh"
 	},
 	"keywords": [],
 	"license": "MIT",
